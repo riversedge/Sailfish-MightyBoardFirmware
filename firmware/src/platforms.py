@@ -355,7 +355,8 @@ platforms = {
                         'PLATFORM_THE_REPLICATOR_STR=\\\"Creator X / Pro\\\"',
                         'HEATERS_ON_STEROIDS', 'AUTO_LEVEL',
                         'PSTOP_ZMIN_LEVEL', 'HAS_RGB_LED', 'RGB_LED_MENU',
-                        'EEPROM_MENU_ENABLE' ]
+                        'EEPROM_MENU_ENABLE', 'AUTO_LEVEL_TOOL_ON_ZMAX',
+                        'AUTO_LEVEL_FFCP' ]
         },
 
     'wanhao_dup4' :

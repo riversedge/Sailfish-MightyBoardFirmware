@@ -329,7 +329,11 @@ inline void handleGetPosition(OutPacket& to_host) {
 		to_host.append32(p[2]);
 		// From spec:
 		// endstop status bits: (7-0) : | N/A | N/A | z max | z min | y max | y min | x max | x min |
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+		uint8_t endstop_status = steppers::getEndstopStatus(special_probeactive_command);
+#else
 		uint8_t endstop_status = steppers::getEndstopStatus();
+#endif
 		to_host.append8(endstop_status);
 	}
 }
@@ -355,7 +359,11 @@ inline void handleGetPositionExt(OutPacket& to_host) {
 
 		// From spec:
 		// endstop status bits: (15-0) : | b max | b min | a max | a min | z max | z min | y max | y min | x max | x min |
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+		uint8_t endstop_status = steppers::getEndstopStatus(special_probeactive_command);
+#else
 		uint8_t endstop_status = steppers::getEndstopStatus();
+#endif
 
 		to_host.append16((uint16_t)endstop_status);
 	}
@@ -545,6 +553,10 @@ void handleBuildStopNotification() {
 
  	// turn off the cooling fan
 	Motherboard::setExtra(false);
+
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+   command::resetASIZHomeOffset();
+#endif
 
 	buildState = BUILD_FINISHED_NORMALLY;
 	currentState = HOST_STATE_READY;
@@ -836,6 +848,9 @@ void stopBuildNow() {
 	RGB_LED::setDefaultColor();
 #endif
     buildState = BUILD_CANCELED;
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+   command::resetASIZHomeOffset();
+#endif
 }
 
 // Stop the current build, if any via an intermediate state (BUILD_CANCELLING),
@@ -857,6 +872,13 @@ void stopBuild() {
 		stopBuildNow();
     else
 		command::pause(true);
+
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+   special_probeactive_command = false;
+#endif
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+   command::resetASIZHomeOffset();
+#endif
 }
 
 /// update state variables if print is paused

@@ -31,6 +31,7 @@
 #include <util/delay.h>
 #include "Piezo.hh"
 #include <avr/wdt.h>
+#include <limits.h>
 
 // In 4.6.2/.3 avr-gcc toolchain, _MemoryBarrier() is incorrectly defined
 #if defined(AVR_CPUFUNC_GOOD)
@@ -54,6 +55,12 @@
 #include "SkewTilt.hh"
 #endif
 
+
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+bool special_probeactive_command = false; 
+uint32_t orig_zoffset = UINT_MAX;
+#endif
+
 namespace command {
 
 static bool sdCardError;
@@ -61,7 +68,7 @@ static bool sdCardError;
 // When non-zero, a P-Stop has been requested
 bool pstop_triggered = 0;
 
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
 // When non-zero, a probe trigger threshold has been reached
 static bool zprobe_stop_triggered = 0;
 #endif
@@ -81,6 +88,7 @@ bool pstop_okay = false;
 uint8_t pstop_move_count = 0;
 
 #endif
+
 
 #define COMMAND_BUFFER_SIZE 512
 uint8_t buffer_data[COMMAND_BUFFER_SIZE];
@@ -141,10 +149,10 @@ static uint16_t home_timeout_s;
 
 #if defined(AUTO_LEVEL)
 static uint8_t alevel_state;
-#if defined(PSTOP_SUPPORT) && defined(PSTOP_ZMIN_LEVEL)
-uint8_t zprobe_hits = 0;
-uint8_t max_zprobe_hits = ALEVEL_MAX_ZPROBE_HITS_DEFAULT; // Later set by steppers::reset()
-#endif
+   #if defined(PSTOP_SUPPORT) && (defined(Z_MAX_STOP_PORT) || defined(PSTOP_ZMIN_LEVEL))
+   uint8_t zprobe_hits = 0;
+   uint8_t max_zprobe_hits = ALEVEL_MAX_ZPROBE_HITS_DEFAULT; // Later set by steppers::reset()
+   #endif
 #endif
 
 uint16_t getRemainingCapacity() {
@@ -195,6 +203,10 @@ uint8_t getBuildPercentage(void) {
 }
 
 #if defined(AUTO_LEVEL)
+
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+static void AutoLevelZInductionProbe(bool enable);
+#endif
 
 void alevel_update(Point &newPoint) {
 
@@ -255,6 +267,9 @@ static void cancelMidBuild() {
      // platform to "unclear" itself.
      command_buffer.reset();
 
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX 
+     AutoLevelZInductionProbe(false);
+#endif
      // And finally cancel the build
      host::stopBuild();
 }
@@ -272,9 +287,9 @@ void pause(bool pause, bool cold) {
 	coldPause = cold;
 #if defined(PSTOP_SUPPORT)
 	pstop_triggered = false;
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
-	zprobe_stop_triggered = false;
-#endif
+   #if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
+   	zprobe_stop_triggered = false;
+   #endif
 #endif
 }
 
@@ -441,7 +456,7 @@ void buildReset() {
 	pstop_triggered = false;
 	pstop_move_count = 0;
 	pstop_okay = false;
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
 	zprobe_hits = 0;
 	zprobe_stop_triggered = false;
 #endif
@@ -469,6 +484,199 @@ void buildReset() {
 #endif
 }
 
+#if defined(AUTO_LEVEL) && defined(AUTO_LEVEL_TOOL_ON_ZMAX)
+static void showProbeMessage(const prog_uchar msg1[], int timeOut)
+{
+   MessageScreen* scr = Motherboard::getBoard().getMessageScreen();
+   scr->clearMessage();
+   //scr->setXY(0,0);
+   if (msg1 != NULL) scr->addMessage(msg1);
+   InterfaceBoard& ib = Motherboard::getBoard().getInterfaceBoard();
+   if (ib.getCurrentScreen() != scr) {
+      ib.pushScreen(scr);
+   }
+   scr->refreshScreen();
+   if (timeOut > 0) scr->setTimeout(timeOut);
+}
+
+static void popProbeMessage(bool reset)
+{
+   Motherboard& board = Motherboard::getBoard();
+   MessageScreen* scr = board.getMessageScreen();
+   InterfaceBoard& ib = board.getInterfaceBoard();
+   if (ib.getCurrentScreen() == scr) {
+      ib.popScreen();
+   }
+
+   //Reset the underlying screen which is ActiveBuildMenu, so that it adds/removes
+   //the filament menu as necessary
+   if (reset) ib.getCurrentScreen()->reset();
+}
+
+static void showProbeMessage(const char *msg, int timeOut)
+{
+   MessageScreen* scr = Motherboard::getBoard().getMessageScreen();
+   scr->clearMessage();
+   scr->addMessage(msg);
+   InterfaceBoard& ib = Motherboard::getBoard().getInterfaceBoard();
+   if (ib.getCurrentScreen() != scr) {
+      ib.pushScreen(scr);
+   }
+   scr->refreshScreen();
+   if (timeOut > 0) scr->setTimeout(timeOut);
+}
+
+static void AutoLevelZInductionProbe(bool enable)
+{
+   if (enable)
+   {
+      special_probeactive_command = true;
+      showProbeMessage(AUTOPROBE_MSG, false);
+   } else {
+      special_probeactive_command = false;
+      popProbeMessage(false);
+   }
+}
+
+void resetASIZHomeOffset()
+{
+   if (orig_zoffset != INT_MAX)
+   {
+      uint32_t zhoffset = eeprom_offsets::AXIS_HOME_POSITIONS_STEPS + sizeof(int32_t) * (Z_AXIS);
+      cli();
+      eeprom_write_block(&orig_zoffset, (void *)zhoffset, 4);
+      sei();
+      orig_zoffset = INT_MAX;
+   }
+}
+
+static void AutoLevelSetInductionOffset()
+{
+   // Get the current state of the probe active command
+   bool currentProbeActive = special_probeactive_command;
+   ModeState currentMode = mode;
+   bool currentSkewActive = skew_active;
+
+   uint8_t toolIndex;
+
+   // Show the offset message
+   showProbeMessage(AUTOPROBE_FINDZOFFSET_MSG, 0);
+   
+   // Write the zhome offset to eeprom
+   uint32_t zoffset = 0;
+   uint32_t zhoffset = eeprom_offsets::AXIS_HOME_POSITIONS_STEPS + sizeof(int32_t) * (Z_AXIS);
+   cli();
+   if (orig_zoffset == INT_MAX)
+   {
+      eeprom_read_block(&orig_zoffset, (void *)zhoffset, sizeof(uint32_t));
+   }
+   eeprom_write_block(&zoffset, (void *)zhoffset, 4);
+   sei();
+
+   // Turn the probe off
+   special_probeactive_command = false;
+
+   // Zero to the switch Z axis
+   mode = HOMING;
+   homing_timeout.start(20 * 1000L * 1000L);
+   uint8_t flags = 1 << Z_AXIS;  // Z AXIS SET 3rd bit
+   steppers::startHoming(false, flags, 0x88);  // Home min, Z axis, feedrate
+   // Wait for home to finish
+   while ( steppers::isRunning() )
+   {
+      Motherboard::getBoard().runMotherboardSlice();
+      steppers::runSteppersSlice();
+      if ( homing_timeout.hasElapsed() ) 
+      {
+         steppers::abort();
+         mode = currentMode;
+         special_probeactive_command = currentProbeActive;
+         skew_active = currentSkewActive;
+         popProbeMessage(false);
+         showProbeMessage(AUTOPROBE_SWITCHHOMEFAIL_MSG, 5);
+         cancelMidBuild();
+         return;
+      }
+   }
+   mode = currentMode;
+
+   // Read the current Z axis point
+   Point currentPoint = steppers::getStepperPosition(&toolIndex);
+   int32_t switchZposition = currentPoint[Z_AXIS];
+   float fspos = (float)switchZposition / (float)stepperAxis[Z_AXIS].steps_per_mm;
+  
+   // Move Z -5
+   const uint32_t zSteps = 5 * stepperAxis[Z_AXIS].steps_per_mm;  // Steps to move 
+   Point targetPoint = Point(STEPPERS_(currentPoint[X_AXIS],currentPoint[Y_AXIS],zSteps,currentPoint[A_AXIS],currentPoint[B_AXIS]));
+   const uint8_t relative = 1<<Z_AXIS;
+   int32_t dda_rate = (int32_t)(FPTOF(stepperAxis[Z_AXIS].max_feedrate) * (float)stepperAxis[Z_AXIS].steps_per_mm);
+   float dx = (float)0 / (float)stepperAxis[X_AXIS].steps_per_mm;
+   float dy = (float)0 / (float)stepperAxis[Y_AXIS].steps_per_mm;
+   float dz = (float)zSteps / (float)stepperAxis[Z_AXIS].steps_per_mm;
+   float distance = sqrtf(dx*dx + dy*dy + dz*dz);
+   steppers::setTargetNewExt(targetPoint, dda_rate, relative, distance, (int16_t)(FPTOF(stepperAxis[Z_AXIS].max_feedrate) * 64.0));
+   // Wait for move to finish
+   while ( steppers::isRunning() )
+   {
+      Motherboard::getBoard().runMotherboardSlice();
+      steppers::runSteppersSlice();
+   }
+
+   // Turn the probe on
+   special_probeactive_command = true;
+
+   // Zero to the probe Z switch
+   mode = HOMING;
+   homing_timeout.start(20 * 1000L * 1000L);
+   flags = 1 << Z_AXIS;  // Z AXIS SET 3rd bit
+   steppers::startHoming(false, flags, 0x88);  // Home min, Z axis, feedrate
+   // Wait for home to finish
+   while ( steppers::isRunning() )
+   {
+      Motherboard::getBoard().runMotherboardSlice();
+      steppers::runSteppersSlice();
+      if ( homing_timeout.hasElapsed() ) 
+      {
+         steppers::abort();
+         mode = currentMode;
+         special_probeactive_command = currentProbeActive;
+         skew_active = currentSkewActive;
+         popProbeMessage(false);
+         showProbeMessage(AUTOPROBE_PROBEHOMEFAIL_MSG, 5);
+         cancelMidBuild();
+         return;
+      }
+   }
+   mode = currentMode;
+
+   // Read the probe Z switch (this works because Induction Probe @ Max doesn't reset Z=0)
+   currentPoint = steppers::getStepperPosition(&toolIndex);
+   int32_t probeZposition = currentPoint[Z_AXIS];
+   float fppos = (float)probeZposition / (float)stepperAxis[Z_AXIS].steps_per_mm;
+
+   // Read the difference
+   zoffset = probeZposition - switchZposition;
+
+   // Write the zhome offset to eeprom
+   cli();
+   eeprom_write_block(&zoffset, (void *)zhoffset, 4);
+   sei();
+
+   // Show the z offset for 3 seconds
+   char offsetmsg[80];
+   float offsetVal = (float)zoffset / (float)stepperAxis[Z_AXIS].steps_per_mm;
+   sprintf_P(offsetmsg, PSTR("%S\n%S%0.3f\nSwitch: %0.3f\nProbe: %0.3f"), AUTOPROBE_FINDZOFFSET_MSG, AUTOPROBE_ZOFFSET_MSG, offsetVal, fspos, fppos);
+   popProbeMessage(false);
+   showProbeMessage(offsetmsg, 3); // Display this probe message
+
+   // Reset the current params
+   mode = currentMode;
+   special_probeactive_command = currentProbeActive;
+   skew_active = currentSkewActive;
+}
+
+#endif
+
 void reset() {
         buildReset();
 	buildPercentage = 101;
@@ -484,7 +692,7 @@ bool isReady() {
     return (mode == READY);
 }
 
-#if defined(PSTOP_SUPPORT) && defined(PSTOP_ZMIN_LEVEL) && defined(AUTO_LEVEL) && defined(Z_MIN_STOP_PORT)
+#if defined(PSTOP_SUPPORT) && defined(PSTOP_ZMIN_LEVEL) && defined(AUTO_LEVEL) && (defined(Z_MIN_STOP_PORT) || defined(Z_MAX_STOP_PORT))
 void possibleZLevelPStop() {
 
      // Ignore if auto-leveling is not active OR we're not tracking probe hits
@@ -723,7 +931,7 @@ void restoreDigiPots(void) {
 static void pstop_incr() {
      if ( !pstop_okay && ++pstop_move_count > 4 ) {
 	  pstop_okay = true;
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
 	  zprobe_hits = 0;
 #endif
      }
@@ -1173,7 +1381,7 @@ void handlePauseState(void) {
 			pauseErrorMessage = 0;
 #if defined(PSTOP_SUPPORT)
 			pstop_triggered = false;
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
 			zprobe_stop_triggered = false;
 #endif
 #endif
@@ -1324,13 +1532,13 @@ void runCommandSlice() {
 #if defined(PSTOP_SUPPORT)
 	// We don't act on the PSTOP when we are homing or are paused
 	if ( (pstop_triggered
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
  || zprobe_stop_triggered
 #endif
 		  ) && pstop_okay && mode != HOMING && paused == PAUSE_STATE_NONE ) {
 		if ( !isPaused() )
 		{
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
 		     pauseErrorMessage = ( zprobe_stop_triggered ) ?
 			  MAX_PROBE_HITS_STOP_MSG : PSTOP_MSG;
 #else
@@ -1339,7 +1547,7 @@ void runCommandSlice() {
 		     host::pauseBuild(true, true);
 		}
 		pstop_triggered = false;
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
 		zprobe_hits = 0;
 #endif
 	}
@@ -1493,7 +1701,10 @@ void runCommandSlice() {
 			    (command != HOST_CMD_FIND_AXES_MAXIMUM) &&
 			    (command != HOST_CMD_TOOL_COMMAND) &&
 			    (command != HOST_CMD_PAUSE_FOR_BUTTON) &&
-				(command != HOST_CMD_SET_BUILD_PERCENT)) {
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX 
+             (command != HOST_CMD_SET_BEEP) &&
+#endif
+				 (command != HOST_CMD_SET_BUILD_PERCENT)) {
        	                         if ( ! st_empty() )     return;
        	                 }
 
@@ -1713,7 +1924,7 @@ void runCommandSlice() {
 #if defined(PSTOP_SUPPORT)
 					// Assume that by now coordinates are set
 					pstop_okay = true;
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
 					zprobe_hits = 0;
 #endif
 #endif
@@ -1737,7 +1948,7 @@ void runCommandSlice() {
 #if defined(PSTOP_SUPPORT)
 					// Assume that by now coordinates are set
 					pstop_okay = true;
-#if defined(AUTO_LEVEL) && defined(PSTOP_ZMIN_LEVEL)
+#if defined(AUTO_LEVEL) && (defined(PSTOP_ZMIN_LEVEL) || defined(Z_MAX_STOP_PORT))
 					zprobe_hits = 0;
 #endif
 #endif
@@ -1860,14 +2071,30 @@ void runCommandSlice() {
 							    ? ALEVEL_COLINEAR_MSG : ALEVEL_BADLEVEL_MSG;
 
 
+
 						  // Now cancel the build
 						  cancelMidBuild();
-					     }
+                    }
+                    else
+                    {
+                       // Set message showing level completed
+                       Motherboard& board = Motherboard::getBoard();
+                       MessageScreen* scr = board.getMessageScreen();
+                       scr->clearMessage();
+                       // scr->setXY(0,0);  // handled by clearMessage()
+                       scr->addMessage(ALEVEL_GOOD_MSG);
+                       InterfaceBoard& ib = board.getInterfaceBoard();
+                       if (ib.getCurrentScreen() != scr) {
+                          ib.pushScreen(scr);
+                       } else {
+                          scr->refreshScreen();
+                       }
+                       scr->setTimeout(2);
+                    }
 					}
 					else if ( axes == (1 << A_AXIS) ) {
 					     // Trigger only for A
 					     // Do not trigger if any of X, Y, or Z was specified
-
 					     // M132 A -- check skew data and cancel build if delta is lower than threshold, for calibration script only
 					     // alevel_state must have bits 0, 1, and 2 set
 					     auto_level_t alevel_data;
@@ -1904,15 +2131,15 @@ void runCommandSlice() {
 					else {
 #endif
 					     for (uint8_t i = 0; i <= Z_AXIS; i++) {
-						  if ( axes & (1 << i) ) {
-						       uint16_t offset = eeprom_offsets::AXIS_HOME_POSITIONS_STEPS + 4*i;
-						       cli();
-						       eeprom_read_block(&(newPoint[i]), (void*) offset, 4);
-						       sei();
-						  }
+                       if ( axes & (1 << i) ) {
+                          uint16_t offset = eeprom_offsets::AXIS_HOME_POSITIONS_STEPS + 4*i;
+                          cli();
+                          eeprom_read_block(&(newPoint[i]), (void*) offset, 4);
+                          sei();
+                       }
 					     }
 
-					     lastFilamentPosition[0] = newPoint[A_AXIS];
+                    lastFilamentPosition[0] = newPoint[A_AXIS];
 #if EXTRUDERS > 1
 					     lastFilamentPosition[1] = newPoint[B_AXIS];
 #endif
@@ -1966,8 +2193,14 @@ void runCommandSlice() {
 					uint16_t beep_length = pop16();
 					pop8();	//uint8_t effect
 					LINE_NUMBER_INCR;
-                    Piezo::setTone(frequency, beep_length);
 
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+               if (frequency == 0 && beep_length == 0) AutoLevelZInductionProbe(false);
+               else if (frequency == 1 && beep_length == 0) AutoLevelZInductionProbe(true);
+               else if (frequency == 2 && beep_length == 0) AutoLevelSetInductionOffset();
+               else
+#endif
+               Piezo::setTone(frequency, beep_length);
 				}
 			}else if (command == HOST_CMD_TOOL_COMMAND) {
 				if (command_buffer.getLength() >= 4) { // needs a payload
@@ -2016,9 +2249,10 @@ void runCommandSlice() {
 			} else if (command == HOST_CMD_SET_BUILD_PERCENT){
 				if (command_buffer.getLength() >= 3){
 					pop8(); // remove the command code
-					buildPercentage = pop8();
+					uint8_t buildPercentage = pop8();
 					pop8();	// uint8_t ignore; // remove the reserved byte
 					LINE_NUMBER_INCR;
+
 #if defined(BUILD_STATS) || defined(ESTIMATE_TIME)
 					//Set the starting time / percent on the first HOST_CMD_SET_BUILD_PERCENT
 					//with a non zero value sent near the start of the build

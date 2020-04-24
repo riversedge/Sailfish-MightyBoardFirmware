@@ -432,7 +432,7 @@ void factoryResetEEPROM()
 			  COOLING_FAN_DUTY_CYCLE_DEFAULT);
 
 	{
-	     uint32_t dummy[5] = { ALEVEL_PROBE_OFFSETS_X,
+	     int32_t dummy[5] = { ALEVEL_PROBE_OFFSETS_X,
 				   ALEVEL_PROBE_OFFSETS_Y,
 				   ALEVEL_PROBE_P1_COMP,
 				   ALEVEL_PROBE_P2_COMP,

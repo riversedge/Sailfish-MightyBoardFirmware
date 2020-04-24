@@ -957,8 +957,12 @@ ISR(TIMER5_COMPA_vect) {
 	if ( PSTOP2_PORT.getValue() == 0 ) command::pstop_triggered = true;
 #endif
 
-#if defined(PSTOP_ZMIN_LEVEL) && defined(Z_MIN_STOP_PORT) && defined(AUTO_LEVEL)
+#if (defined(PSTOP_ZMIN_LEVEL) || (defined(Z_MAX_STOP_PORT) && defined(AUTO_LEVEL_TOOL_ON_ZMAX))) && defined(Z_MIN_STOP_PORT) && defined(AUTO_LEVEL)
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+        if ( (Z_MAX_STOP_PORT.getValue() == 0) ) {
+#else
         if ( (Z_MIN_STOP_PORT.getValue() == 0) ) {
+#endif
 	     // 40 ticks of zprobe low is 1 second
 	     if ( ++total_zprobe_triggered >= 40 ) {
 		  command::possibleZLevelPStop();

@@ -937,6 +937,17 @@ void MessageScreen::addMessage(CircularBuffer& buf) {
 		message[MSG_SCR_BUF_SIZE-1] = '\0';
 }
 
+void MessageScreen::addMessage(const char *msg)
+{
+   cursor += strlcpy(message + cursor, msg, MSG_SCR_BUF_SIZE - cursor);
+
+   // ensure that message is always null-terminated
+   if (cursor < MSG_SCR_BUF_SIZE - 1)
+      message[cursor] = '\0';
+   else
+      message[MSG_SCR_BUF_SIZE-1] = '\0';
+}
+      
 
 void MessageScreen::addMessage(const prog_uchar msg[]) {
 
@@ -1281,6 +1292,7 @@ void MonitorModeScreen::update(LiquidCrystalSerial& lcd, bool forceRedraw) {
 #ifdef ACCEL_STATS
 	const static PROGMEM prog_uchar mon_speed[] = "Acc:                ";
 #endif
+
 	Motherboard& board = Motherboard::getBoard();
 
 	if ( !heating ) {

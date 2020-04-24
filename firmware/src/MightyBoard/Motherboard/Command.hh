@@ -32,6 +32,8 @@
 #define PAUSE_STATE_EXIT_COMMAND	0x80
 #define PAUSE_STATE_ERROR_COMMAND       0x20
 
+extern bool special_probeactive_command;
+
 enum PauseState {
 	//Other states
 	PAUSE_STATE_NONE				= PAUSE_STATE_OTHER_COMMAND,
@@ -165,6 +167,10 @@ void push(uint8_t byte);
 
 /// commands are no longer executed when the heat shutdown is activated
 void heatShutdown();
+
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+void resetASIZHomeOffset();
+#endif
 
 #if defined(LINE_NUMBER)
 

@@ -458,6 +458,7 @@ public:
 
 	void addMessage(CircularBuffer& buf);
 	void addMessage(const prog_uchar msg[]);
+   void addMessage(const char *msg);
 	void clearMessage();
 	void setTimeout(uint8_t seconds);//, bool pop);
 	void refreshScreen();

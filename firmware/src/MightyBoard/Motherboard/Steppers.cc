@@ -1148,11 +1148,20 @@ void changeToolIndex(uint8_t tool) {
 
 // endstop status bits: (7-0) : | N/A | N/A | z max | z min | y max | y min | x max | x min |
 
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+uint8_t getEndstopStatus(bool probeActive) {
+#else
 uint8_t getEndstopStatus() {
+#endif
 	uint8_t status = 0;
 
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX   
+   if (probeActive) status |= (STEPPER_IOPORT_READ(autolevel_InductionProbe) ^ stepperAxis[Z_AXIS].invert_endstop) << 4;
+   status |= stepperAxisIsAtMinimum(Z_AXIS) << 4;  // Safeguard hitting real min switch
+#else
 	status |= stepperAxisIsAtMaximum(Z_AXIS) << 5;
 	status |= stepperAxisIsAtMinimum(Z_AXIS) << 4;
+#endif
 	status |= stepperAxisIsAtMaximum(Y_AXIS) << 3;
 	status |= stepperAxisIsAtMinimum(Y_AXIS) << 2;
 	status |= stepperAxisIsAtMaximum(X_AXIS) << 1;

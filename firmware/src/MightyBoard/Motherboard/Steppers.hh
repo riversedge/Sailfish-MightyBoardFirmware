@@ -145,7 +145,11 @@ namespace steppers {
     void changeToolIndex(uint8_t tool);
 
     /// return a bit field that contains the state of the endstops
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+    uint8_t getEndstopStatus(bool probeActive);
+#else
     uint8_t getEndstopStatus();
+#endif
 
     /// Enables and disables prime / deprime'ing.  Typically used
     /// when loading / unload filament of if deprime / prime is being handled in

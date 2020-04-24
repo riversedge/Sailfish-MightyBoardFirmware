@@ -36,6 +36,8 @@ extern uint8_t pstop_enabled;
 extern uint8_t pstop_value;
 #endif
 
+extern bool special_probeactive_command;
+
 enum AxisEnum {
         X_AXIS=0,
         Y_AXIS,
@@ -97,6 +99,10 @@ struct StepperIOPort {
 };
 
 #define STEPPER_NULL	{ 0, 0, 0, 0 }
+
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+extern StepperIOPort autolevel_InductionProbe;
+#endif
 
 struct dda {
         bool    master;         //True if this is the master steps axis
@@ -199,6 +205,18 @@ FORCE_INLINE bool stepperAxisIsAtMinimum(uint8_t axis) {
 /// Makes a step, but checks if an endstop is triggered first, if it is, the
 /// step is abandoned and "true" is returned.
 FORCE_INLINE bool stepperAxisStepWithEndstopCheck(uint8_t axis, bool direction) {
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+   // If special induction probe command is active, we're stepping Z axis, we're homing, and it's direction is homing minimum check that probe first
+   if (special_probeactive_command && axis == Z_AXIS && axis_homing[axis] && (! direction))
+   {
+      bool atProbeEndstop = (STEPPER_IOPORT_READ(autolevel_InductionProbe) ^ stepperAxis[Z_AXIS].invert_endstop);
+      if (atProbeEndstop)
+      {
+         axis_homing[axis] = false;
+         return false;
+      }
+   }
+#endif
 	if (( (direction)   && (! stepperAxisIsAtMaximum(axis))) ||
 	    ( (! direction) && (! stepperAxisIsAtMinimum(axis)))) {
 		stepperAxisStep(axis, true);

@@ -75,12 +75,20 @@ enum LEDColors {
 // X & Y offset between the probe and extruder in units of steps
 //  +X is to the right; -X to the left
 //  +Y is to the back; -Y is to the front
-#define ALEVEL_PROBE_OFFSETS_Y  0
-#if defined(ZYYX_3D_PRINTER)
-// 27 mm * 88.573186 steps/mm
-#define ALEVEL_PROBE_OFFSETS_X  2391
+#if defined(AUTO_LEVEL_FFCP)
+   // -55 mm * 94.117647 steps/mm = -5176
+   #define ALEVEL_PROBE_OFFSETS_Y -5176
 #else
-#define ALEVEL_PROBE_OFFSETS_X  0
+   #define ALEVEL_PROBE_OFFSETS_Y  0
+#endif
+#if defined(ZYYX_3D_PRINTER)
+   // 27 mm * 88.573186 steps/mm
+   #define ALEVEL_PROBE_OFFSETS_X  2391
+#elif defined(AUTO_LEVEL_FFCP)
+   // -61 mm * 94.117647 = -5741
+   #define ALEVEL_PROBE_OFFSETS_X  -5741
+#else
+   #define ALEVEL_PROBE_OFFSETS_X  0
 #endif
 
 typedef struct {

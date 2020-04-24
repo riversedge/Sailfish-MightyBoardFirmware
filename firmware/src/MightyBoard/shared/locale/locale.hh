@@ -316,4 +316,12 @@ extern const unsigned char CHOOSE_HBP_THERM_MSG[];
 extern const unsigned char CHOOSE_THERM_MSG[];
 #endif
 
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+extern const unsigned char AUTOPROBE_MSG[];
+extern const unsigned char AUTOPROBE_FINDZOFFSET_MSG[];
+extern const unsigned char AUTOPROBE_ZOFFSET_MSG[];
+extern const unsigned char AUTOPROBE_SWITCHHOMEFAIL_MSG[];
+extern const unsigned char AUTOPROBE_PROBEHOMEFAIL_MSG[];
+ #endif
+
 #endif // __LOCALE_HH_INCLUDED__

@@ -317,3 +317,11 @@ const PROGMEM prog_uchar CHOOSE_EXT1_THERM_MSG[] = "Tool 1 temp sensor";
 const PROGMEM prog_uchar CHOOSE_HBP_THERM_MSG[]  = "Bed temp sensor";
 const PROGMEM prog_uchar CHOOSE_THERM_MSG[]      = "Temp Sensor Types";
 #endif
+
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+const PROGMEM prog_uchar AUTOPROBE_MSG[]                 = " - Autoprobe mode - ";
+const PROGMEM prog_uchar AUTOPROBE_FINDZOFFSET_MSG[]     = " - Find Z Offset -  ";
+const PROGMEM prog_uchar AUTOPROBE_ZOFFSET_MSG[]         = "Probe offset: ";
+const PROGMEM prog_uchar AUTOPROBE_SWITCHHOMEFAIL_MSG[]  = "Switch home failed!";
+const PROGMEM prog_uchar AUTOPROBE_PROBEHOMEFAIL_MSG[]   = "Probe home failed!";
+#endif

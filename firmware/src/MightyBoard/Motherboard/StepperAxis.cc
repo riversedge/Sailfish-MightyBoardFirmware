@@ -42,6 +42,10 @@ static StepperIOPort pstop_port = X_STEPPER_MIN;
 #define PSTOP_AXIS_END minimum
 #endif
 
+#if defined(AUTO_LEVEL_TOOL_ON_ZMAX)
+StepperIOPort autolevel_InductionProbe = Z_AL_PROBE_PORT;
+#endif
+
 #if defined(PSTOP_SUPPORT)
 #if defined(ZYYX_3D_PRINTER)
 uint8_t pstop_enabled = 1;  // Enabled by default
@@ -189,6 +193,13 @@ void stepperAxisInit(bool hard_reset) {
 				STEPPER_IOPORT_SET_DIRECTION(stepperAxisPorts[i].maximum, false);
 				STEPPER_IOPORT_WRITE(stepperAxisPorts[i].maximum, stepperAxis[i].invert_endstop);
 			}
+#ifdef AUTO_LEVEL_TOOL_ON_ZMAX
+         if (i == Z_AXIS)
+         {
+            STEPPER_IOPORT_SET_DIRECTION(autolevel_InductionProbe, false);
+            STEPPER_IOPORT_WRITE(autolevel_InductionProbe, stepperAxis[i].invert_endstop);
+         }
+#endif
 
 			if ( ! STEPPER_IOPORT_NULL(stepperAxisPorts[i].minimum) ) {
 				STEPPER_IOPORT_SET_DIRECTION(stepperAxisPorts[i].minimum, false);
